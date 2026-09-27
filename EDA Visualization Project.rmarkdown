@@ -1,0 +1,69 @@
+---
+title: "Week 7 - Visualisations"
+author: "Tiffany Twesiga"
+date: 03-03-2026
+---
+
+Loading data set
+
+```{r}
+getwd()
+casualty_data <- read_csv("casualty_data.csv")
+```
+
+## Previously used data set
+
+In week 2 I created a histogram to view the distribution of various light conditions that caused casualties, using this code.
+
+```{r}
+#Previous graph
+hist(casualty_data$light_conditions, main = "Distribution of Light conditions", xlab = "Light condition")
+```
+
+While this graph is slightly clear enough to get the point across. In this qmd I will recreate this graph, and update it with better formatting.
+
+## Revised Graph
+
+This is still a graph detailing the distribution of reported light conditions that lead to casualties, using the exact same data. However, this time it will detail light conditions and weather conditions using a multi-histogram which conveys the effect of two conditions, light and weather.
+
+```{r}
+#loading packages
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+```
+
+```{r}
+#Reshaping data form from wide to long
+casualty_long <- casualty_data |> select(light_conditions, weather_conditions) |> pivot_longer(cols = everything(), names_to = "variable", values_to = "Score")
+```
+
+```{r}
+revised_conditions_graph <- ggplot(casualty_long, aes(x = Score, fill = variable)) + geom_histogram(alpha = 0.6, position = "identity", bins = 30) + theme_minimal() + scale_fill_manual(values = c("orange", "steelblue")) + labs(title = "Distribution of reported Light and Weather conditions", x = "Reported Score", y = "No. of times reported", fill = "variable", caption = "Source: UKGOV Road safety statistics data tables")
+
+print(revised_conditions_graph)
+```
+
+The changes I applied to this plot are:
+
+-   Analyzing two variables instead of one for a more inoformative picture of the data.
+
+-   Renaming the x and y axis labels for clarity.
+
+-   Differentiating the variable results by the contrasting colors blue, and orange.
+
+-   A better Title that explains the plot better.
+
+-   Added a caption with the source.
+
+## My new Visualization
+
+To satisfy task 3 of this assignment I shall make a new plot that uses variables I have not visualized yet. The variables I selected are: Collision severity, and the number of vehicles involved. I will be making a stacked bar chart to see if the proportion of accidents increase as more vehicles get involved.
+
+```{r}
+#Creating a stacked bar chart
+vehicle_bar_plot <- casualty_data |> filter(number_of_vehicles > 0 & number_of_vehicles <= 6) |> ggplot(aes(x = as.factor(number_of_vehicles), fill = as.factor(collision_severity))) + geom_bar(position = "fill") + scale_y_continuous(labels = scales::percent) + scale_fill_manual(values = c("#C3DEED", "#F6C7B3", "#82B2C0"), name = "Severity", labels = c("1 (Slight)", "2 (Serious)", "3 (Fatal)")) + theme_minimal() + labs(title = "Does Severity Increase with More Vehicles?", x = "Number of Vehicles", y = "Percentage of Total Accidents", caption = "Source: UKGOV Road safety statistics data tables")
+
+print(vehicle_bar_plot)
+```
+
