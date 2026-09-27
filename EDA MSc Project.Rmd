@@ -1,0 +1,673 @@
+---
+title: "Collective Coursework (W2,3,4,5)"
+author: "Tiffany Twesiga"
+date: "2026-03-03"
+output: html_document
+---
+
+## Week 2 - Dataset Exploration and First Wrangling
+
+# Dataset Selection and Rationale
+## 1.1 Dataset choice
+
+Using the Casualty dataset from the UK Road Safety: Collisions, Vehicles, and Casualties provisional 2025. I chose this dataset because casualties, wether slight or severe, are serious. Proper analysis of the data may help spread the word about the frequency of accidents, and increase road safety across the UK.
+
+### (Insert code cells – load dataset)
+```{r}
+#Checking if the package is in my library
+library(readr)
+#Loading the data file into r
+casualty_data <- read_csv("casualty_data.csv")
+#Previewing the first 10 rows
+head(casualty_data,10)
+```
+
+## 1.2 Justification
+
+This dataset suits my project idea perfectly because it is the only dataset with causalty causing light, weather, and road surface conditions all together so that I can provide an analysis that answers my question: What combination of conditions are more likely to create a severe casualty. 
+
+# 2 First Glimpse of the Data
+## 2.1 Initial inspection
+
+```{r}
+#Inspecting and Discussing the structure of the Data
+#Overall structure
+str(casualty_data)
+#44 variables: 8 Character variables, 4 integer variables, 32 number variables.
+#Dimensions
+nrow(casualty_data)
+#48472 rows in the data
+ncol(casualty_data)
+#44 columns in the data
+#Column names
+names(casualty_data)
+```
+
+## 2.2 Observations
+```{r}
+#Pre-processing checks
+#Counting missing values in each column
+colSums(is.na(casualty_data))
+#Missing vales in the folowing columns: location_easting_osgr, location_northing_osgr, longitude and latitude
+
+#Finding duplicate values in the dataset
+library(dplyr)
+casualty_data |> group_by_all() |> filter(n() > 1) |> ungroup()
+#No rows have a duplicate
+
+#Checking duplications on susceptible columns
+sum(duplicated(casualty_data$longitude))
+#3466 duplicated longitudes
+sum(duplicated(casualty_data$latitude))
+#5158 duplicated latitudes
+sum(duplicated(casualty_data$collision_index))
+#0 duplicated collision index's
+sum(duplicated((casualty_data$location_easting_osgr)))
+#4670 duplicated Easting osgr's
+sum(duplicated((casualty_data$location_northing_osgr)))
+#4638 duplicated Northing osgr's 
+sum(duplicated(casualty_data$collision_ref_no))
+#0 duplicated collison reference numbers
+sum(duplicated(casualty_data$date))
+#48291 duplicated dates
+
+
+#Invalid/out-of-range values
+
+#There should only be two values (1,2) in the column about whether a police officer attended the accident
+casualty_data[casualty_data$did_police_officer_attend_scene_of_accident < 0 | casualty_data$did_police_officer_attend_scene_of_accident > 3, ]
+#This column recorded multiple out of range incidents (e.g. -1, 3)
+
+#There should only be two values (1,2) in the column about the presence of trunk road flags.
+casualty_data[casualty_data$trunk_road_flag < 0 | casualty_data$trunk_road_flag > 3, ]
+#Records of several -1 inputs which are out of range
+
+#There should only be three (1: fatal, 2: serious, 3: slight) values in the enhanced severity collision column.
+casualty_data[casualty_data$enhanced_severity_collision < 0 | casualty_data$enhanced_severity_collision >  4, ]
+#Records of several -1 inputs which are out of range
+
+#Further analysis to weed out impossible dates
+impossible_dates <- casualty_data$date[is.na(as.Date(casualty_data$date, format = "%d-%m-%Y"))] 
+
+unique(invalid_dates)
+#All of these days are still normal. Safe to say all dates are well formated and correct.
+```
+
+## Observation Notes
+-Missing values: location_easting_osgr, location_northing_osgr, longitude and latitude.
+
+-Anomalies: did_police_officer_attend_scene of accident (values -1 and 3), trunk_road_flag (value -1), enhance_severity_collision (value -1)
+
+-Messy categories: There were no messy categories in this dataset.
+
+-Malformed dates: There were no malformed dates in this dataset.
+
+-Group Question: Should we clean some entries with missing values such as latitude or longitude even if the whole row is complete in its other columns, or should they be retained for reproducibility?
+
+# 3 Initial Data Wrangling
+
+In terms of cleaning we're going to filter out and remove all of the missing values in the the columns that held them due to them not being research-able due to the context of their nature. For example, all of the incomplete columns we're geographical (latitude, longitude etc.) so obtaning extra information from the dataset or the internet to make sense of the missing value would be almost impossible and extremely time consuming considering geographical locations are broad, and several places can have the same geographical location. Additionally, this data is large with 48,472 rows, and 44 columns so removal of missing data would not have a significant impact on the results of our research question analysis. 
+
+We will also be keeping all duplicated values, as they're found, in terms of areas where duplication should be identified, in locational data (locations can have the same bearings), and the date column (this is a large dataset, more than one collision can occur on the same day). 
+
+We shall transform the data set by adding new columns such as a binary high severity outcome column, and a combined conditions variable (further explained in part 3.2) these will better shape the dataset to answer our research question.
+
+## 3.1 Cleaning
+
+```{r}
+#Filtering out all missing values in the dataset
+clean_casualty_data <- na.omit(casualty_data)
+#We shall be using this dataset from now on
+#Checking for any missing variables
+colSums(is.na(clean_casualty_data))
+#All rows are full now.
+```
+
+## 3.2 Transformation, integration, validation
+
+We decided to add the following new columns to our dataset to help analyize and visualize the data for our research question:
+
+- Since we're intrested in the optinal conditions that will predict the most severe casualties, the addition of a binary high severity outcome column will help us easlity interpret the rate, clearly define what collision reference constiuted as high severity, and what propotion of collisions were high xeverity in the first place.
+
+- Secondly, we'll merge the light, weather, and road surface conditions to calculate the sum severity rates per combination and rank combinations from least to most dangerous.
+
+In the future we will compute the severity rate (Severity rate = High Severity Collisions / Total collisions) for light, weather, road surface, and combined condition, in order to gain exploratory insight.
+
+For now we've decided not to meddle with the impossible values previously highlighted in our dataset because possible removal of the rows where they're held completely will interfere with our project question as conditions will be deleated. Even slightly ambiguous recorded instances still hold meaningful conditions data.
+
+```{r}
+# derived variables or merges
+#Creating a column for binary high severity outcomes
+#high_severity = 1(fatal, severe)
+#high_severity = 0(slight)
+clean_casualty_data <- clean_casualty_data |> dplyr::mutate(high_severity = ifelse(collision_severity %in% c(1,2), 1, 0))
+#Viewing binary variable
+print(clean_casualty_data$high_severity)
+
+#Merging variables light_conditions, weather_coditions, and road_surface_conditions into sum variable combined_condtions.
+clean_casualty_data <- clean_casualty_data |> dplyr::mutate(combined_conditions = paste(light_conditions,
+weather_conditions,
+road_surface_conditions,
+sep = "_"
+))
+#Viewing combined_conditions.
+print(clean_casualty_data$combined_conditions)
+```
+
+## 3.3 Storing cleaned data
+
+Describe where you saved the processed file and why.
+I saved the processed file in my ODS_2026 folder and in my processed data folder on my Github group repository, replacing the original data. I wanted to have two stores, one on my personal device, and once that can be accessed online.
+
+```{r}
+#downloading the cleaned dataset
+write_csv(clean_casualty_data, "~/Downloads/clean_casualty_data.csv")
+```
+
+# 4 Exploratory Data Analysis (EDA)
+## 4.1 Variable identification
+
+- Character variables, Text data (e.g. lsoa_of_accident_location, day_of_week)
+- Numerical variables, non-whole numbers data (e.g. longitude, latitude)
+- Integer variables, whole numbers data (e.g. collision severity, police_force)
+
+```{r}
+# identify variable types
+str(clean_casualty_data)
+```
+
+## 4.2 Descriptive statistics
+
+```{r}
+# descriptive statistics
+summary(clean_casualty_data$latitude)
+summary(clean_casualty_data$longitude)
+```
+## 4.3 Numerical analysis
+
+Discuss histograms and boxplots
+
+```{r}
+#Making a histogram about light conditions
+hist(clean_casualty_data$light_conditions, main ="Distribution of light conditions", xlab="Light condition")
+#Making a boxplot about speed limit
+boxplot(clean_casualty_data$speed_limit)
+```
+
+## 4.4 Categorical analysis
+
+```{r}
+#Viewing frequency distributions with bar charts
+ggplot(clean_casualty_data) + geom_bar(aes(x = road_surface_conditions))
+```
+
+## 4.5 Interpretation
+
+Patterns I have found in the dataset is that its very big, and very intricate data. Despite, my project centering around the worst conditions for a persons safety, there are many analytical tests I can run that paint a fuller picture of the danger. One test coming to mind would be what day of the week the conditions have a worse effect in.
+
+# 5 Documentation and Reflection
+
+Capture reasoning, challenges, and decisions.
+
+## 5.1 What assumptions did you make?
+I assumed that this data would be like previous small body data, but since it was a Goverment dataset, it was much larger than I anticipated.
+## 5.2 What was easy or hard?
+Easy but long
+## 5.3 What would you do differently next time?
+Read through every column title and measure carefully
+# 6 Good Practice Reminders
+Seperate your code for easier reproductivity
+Checklist and reproducibility notes.
+
+* Comments in code
+* Relative paths
+* Push and pull discipline
+* Consistent naming conventions
+
+# 7 Group Notes and Variations
+
+Run as many reasonable statistical tests as we can because a diverse report on the project questions gains more insight into real-life.
+
+# 8 Final Checkpoint Before Submission
+
+Tick items off to ensure readiness.
+
+* Dataset in /data/raw/ - done
+* Cleaned dataset in /data/processed/ - done
+* HTML output in /outputs/ - done
+* Reflection written - done
+* Changes committed and pushed - done
+
+
+## Week 3 - Understanding Your Data: Providence, Quality & Risks
+
+## Overview {.unnumbered}
+
+::: callout-note
+### What this file is for
+
+This week’s focus is more on **reflection and documentation**, and less or not on coding.\
+You will describe where your data comes from, how trustworthy it is, and what risks or limitations it may carry.
+:::
+
+---
+
+# Dataset Overview
+
+A short paragraph (3–5 sentences) describing:
+
+- This dataset reveals the number of casualties created by road accidents in the year 2025, within the United Kingdom. 
+- This dataset was created by the UK goverment and was collected by the STATS19 reporting system when personal collision injuries are reported to the police.
+- Accessed: 01/02/2026, found it in the Microsoft Excel spreadsheet the MSc Data Science course provided, that held other UK Road accident data.
+- This dataset suits my project idea perfectly because it is the only dataset with causalty causing light, weather, and road surface conditions all together so that I can provide an analysis that answers my question: What combination of conditions are more likely to create a severe casualty. 
+
+
+---
+
+# Provenance Summary
+
+Use the table below to record evidence and assessments about your dataset. You can edit or expand it as needed. Please provide short support statement (1-2 lines each) for your verditcs.
+
+| Criterion | Evidence Checked | Verdict |
+|:--|:--|:--|
+| **Origin & Authority** |Created by the UK government; a dataset describing personal injury collisions on public roads reported by the police from 1979 to 2025.|✅|
+| **Coverage & Completeness** | Time span of 01/01/2025 - 06/12/2025, Data is nationwide over England, 44 columns (variables), 48,472 recorded collisions as sample size, 4 columns with missing data |✅|
+| **Timeliness & Stability** | Annual updates to the dataset, with infrequent revisions. However, minor amendments to previous years can be made. Last update 25/09/2025 |✅|
+| **Format & Access** | CSV, I cannot reproduce the import path as this is personal data on my device, and the public data doesn't have a working directory, so there is no path|✅|
+| **Documentation & Versioning** | It has no data dictionary, channel log, or DOI number|✅|
+| **License & Attribution** | Open Government License, [https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/] , Credit statement "Contains public sector information licensed under the Open Government Licence v3.0." |✅|
+| **Sensitivity & Ethics** | No, its anonymous| ✅|
+
+---
+
+
+
+## Licensing Details
+
+Fill in the fields below using information from your dataset’s source page. Copy the exact text if provided.
+
+**License Name:**  Open Government License for public sector information.
+**License Link:**  [https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/].
+**Attribution Text (if provided):**  NONE
+**Notes on Limitations (e.g., Non-Commercial):**  NONE, public domain data.
+
+::: {.callout-tip}
+If you cannot find a license, state:  
+*“No explicit license visible; flagged for clarification or restricted use.”* _Licesnse found_
+:::
+
+---
+
+# Early Risks Reflection
+
+Write about **150 words** identifying key risks or concerns, such as: 
+
+This dataset presents a few early risk. Completeness being the first issue with missing easting and northing values, as well as missing longitude and latitude values, reducing data reliability (see Completeness Risk subsections output). Accuracy issues in this dataset decrease its reliability even more, with impossible values such as numbers outside the expected binarity of column (e.g. did_police_officer_attend_scene_of_accident, trunk_road_flag, and urban_or_rural_area holding data outside of the 1 = Yes/Urban , 2 = No/Rural boundaries). Representation increases the generalisability of this data set with big, government data very many locations in the UK, and shouldn't be considered a risk. Consistent format and clean dataset presentation present no risks to the analysis of this data, neither does ethical risks, since the data is ambiguous. However, if the former risks are ignored, downstream analysis of averages, descriptive statistics, and regressions may produce misleading/innacurate results.
+
+---
+
+# (Optional) API Comparison
+
+If applicable, you may compare data access via direct download vs API.  
+Summarise your observations (e.g., freshness, column structure, metadata differences).
+
+---
+
+# (Optional) Scouting / Alternative Data
+
+List any other datasets you explored (name, link, why rejected or unsuitable). These could be the datasets that are somehow comparable to what you are currently using.\
+A short bullet list is enough.
+
+| Dataset / Source | Relation to Main Dataset | Outcome / Issues |
+|:-----------------|:-------------------------|:-----------------|
+|                  |                          |                  |
+
+---
+
+## Week 4 - Statistics: Distributions & First Model
+
+
+::: callout-note
+### What this file is for
+
+This week is hands-on with **statistics**. You will:
+- Measure spread (**SD, IQR**) for two numerical variables
+- Visualise **distribution shapes** (histograms + Normal overlays)
+- Fit a **simple linear regression** (e.g., `grade ~ study_hours`)
+- Inspect **residuals** to check model fit
+- Record brief **group reflections**
+
+Work with your **cleaned Week 2 dataset** (no impossible or extreme values).
+:::
+
+---
+
+
+```{r}
+#Noticed and discovered a (-1) value in the conditions data means missing data, I want to remove them from the dataset because its interrupting my data.
+table(casualty_data_clean$light_conditions)
+#(-1) appears 307 times
+table(casualty_data_clean$weather_conditions)
+#(-1) appears 422 times
+table(casualty_data_clean$road_surface_conditions)
+#(-1) appears 922 times
+#Attempting to filter them out
+filtered_test_casualty <- filter(casualty_data_clean, light_conditions == -1, weather_conditions == -1, road_surface_conditions == -1)
+#Okay that's something else entirely 
+test <- casualty_data_clean[casualty_data_clean$light_conditions > 0, ]
+clean_casualty_data <- test[test$weather_conditions > 0, ]
+clean_casualty_data <- clean_casualty_data[clean_casualty_data$road_surface_conditions > 0, ]
+#Missing values removed
+#Downloading the clean_casualty_data dataset
+write.csv(clean_casualty_data, "~/Downloads/clean_casualty_data.csv")
+#Updated datset set.
+```
+
+---
+
+# Dataset & Setup
+
+Use your cleaned dataset prepared in Week 2.
+```{r}
+# Load your cleaned dataset
+casualty_data_clean <- read.csv("~/Downloads/ods-group-projects-2526-sem2-s2-ods-team-05/data/processed/clean_casualty_data.csv")
+head(casualty_data_clean, 10)
+#making one formating change to combined condition column.
+#change combination to un added joint variables for clarity.
+casualty_data_clean <- casualty_data_clean |> dplyr::mutate(combined_conditions = paste(light_conditions,
+weather_conditions,
+road_surface_conditions,
+sep = "_"
+))
+#Format appears as joint in the dataset preview regardless.
+str(casualty_data_clean)
+#This of line of code displayed the variable types of the all the columns, numerical, integer, character.
+summary(casualty_data_clean)
+#Descriptive statistics of the variables
+```
+
+**Confirm (1–2 lines):** that the dataset loaded correctly (rows/columns) and that `grade` and `study_hours` are numeric.
+
+---
+
+# Spread & Variability
+
+Compute summaries, SD, and IQRs for at least two two main variables from your dataset (e.g., `grade` and `study_hours`).
+
+```{r}
+# Summaries
+#Main variables chosen: light_conditions and weather-conditions
+summary(casualty_data_clean$light_conditions)
+#Mean light condition 1.89
+sd(casualty_data_clean$light_conditions)
+#Standard Deviation is 1.62
+IQR(casualty_data_clean$light_conditions, na.rm = TRUE)
+#IQR is 0
+
+summary(casualty_data_clean$weather_conditions)
+#Mean weather condition is 1.54
+sd(casualty_data_clean$weather_conditions)
+#Standard Deviation is 1.75
+IQR(casualty_data_clean$weather_conditions, na.rm = TRUE)
+#IQR is 0
+
+#Since the IQR for both is 0, the variable which varies more is weather_conditions. Weather_conditions variable has a higher standard deviation.
+#The IQR's indicate that the middle 50% of both these variables are identical. 
+```
+
+
+---
+
+# Distribution Shapes
+
+Plot histograms and compare with a Normal curve for the same variables.
+
+```{r}
+# Histogram and normal curve for variable 1:light_conditions 
+hist(casualty_data_clean$light_conditions, main ="Distribution of light conditions", xlab="Condition")
+#Right skewed curve, not normally distributed, no outliers
+#Histogram and normal curve for variable 2: weather_conditions
+hist(casualty_data_clean$weather_conditions, main ="Distribution of weather conditions", xlab="Condition")
+#Right skewed curve, not normally distributed, no outliers
+```
+
+**Comment (2–3 lines):** Is each variable roughly Normal, skewed, or heavy-tailed? Does the red curve fit well? Any gaps or outliers?
+
+---
+
+# First Model (Simple Linear Regression)
+
+Fit a simple linear model (use appropriate variables and reason your choice).
+
+```{r}
+# create a model using lm and provide summary
+#creating a linear model for collision severity and weather conditions.
+lm_weather_casualties <- lm(casualty_data_clean$collision_severity ~ casualty_data_clean$weather_conditions, data = casualty_data_clean)
+summary(lm_weather_casualties)
+```
+
+**Interpretation (3–4 lines):**
+**Intercept (β₀)** = The intercept being 2.703 implies that that is what the mean collision severity would be if the weather conditions were reported zero (0).
+**Slope (β₁)** = 0.013 indicates how much the collision severity is expected to increase/decrease for every one-unit increase in reported weather condition.
+**(Optional)** Is the slope statistically significant (p-value)? Yes this slope is significant as the p-value for weather conditions is <2e-16 which is less than 0.05.
+**(Optional)** How much variation does the model explain (R²)? This model explains 0.00218% of the variance.
+
+::: callout-note
+### What is a model?
+
+A **model** is a simplified, mathematical explanation of how things relate or behave.  
+It is **expressed mathematically** (equation/algorithm), **summarises** relationships, **simplifies** what matters, **generalises (within limits)**, and **must be interpretable**.
+
+> A good model is clear, honest, and useful — not a perfect copy of reality, but a way to think better about it.
+:::
+
+---
+
+# Model Fit (Residuals)
+
+Residuals are **errors** = observed − predicted. They should look like random noise around 0.
+
+```{r}
+# Plot the residuals including abline
+#weeding out the residuals in my linear model
+casualty_weather_res = resid(lm_weather_casualties)
+print(casualty_weather_res)
+#ploting residuals
+plot(casualty_data_clean$weather_conditions, casualty_weather_res,
+     ylab="Residuals", xlab="Weather Condition Rating")
+abline(0.012769, 2.703092)
+```
+
+**Comment (2–3 lines): The residuals do not appear to be randomly disributed aroubd zero, they are restricted to specific values because the values in "weather_conditions" are not suited to be used in a stadard linear regression since they are categorical, and the values in "collision_severity" are discrete values only taking up three possible points.
+
+---
+
+# Group Reflection
+
+Keep answers short and specific (1–2 sentences each).
+
+| Question | Reflection |
+
+| **Distributions:** What did shapes reveal about variation or consistency? |The shapes of the graphs revealed that this is not normally distributed data.|
+| **Model:** What does your regression line suggest about the relationship? | The data is out of range for the regression line, but it is still there, and that the resdiuals are skewed.|
+| **Learning:** What was the main thing you learned about your dataset this week? | I might have to reframe severity, and my question to "What combinations of light, weather, and road surface conditions increase the likelihood of a severe casualty?|
+
+---
+
+# Expected Outputs
+
+Your file should include (at least):
+- Two distribution plots
+- One scatterplot with fitted regression line
+- One residual plot
+- Regression summary with brief interpretation
+- Completed reflection table
+
+---
+
+# You are free to explore further along modeling (e.g., trying different variable combinations, or trying multiple regression, or different models available in R libraries).
+# You may also explore along p-values and R².
+
+## Week 5 - Bias, Fairness & Reproducibility
+
+
+* I created a new dataset with the removal of all data points where the UKGOV deemed represented missing, other, or unknown data in the light, weather, and road surface conditions columns. I called that new dataset casuality_data_cleaner.csv.
+
+```{r}
+getwd()
+setwd("~/Documents/ODS_2026/ODS_2026/ODS-GROUP-PROJECTS-2526-sem2-s2-ods-team-05")
+casualty_data_cleaner <- read.csv("data/processed/casualty_data_cleaner.csv")
+```
+
+
+## Weekly Task - 5.1
+
+## What Kind of Bias does this dataset have?
+
+**Discovered Bias:**May hold a sampling issue because recorded casualties seem disproportionate, with high recorded instances in more serious casualties as compared to slight casualties. 
+
+**Actions I can do to maintain control:**I can clarify the scope of this issue first to see if this is a real bias or just a coincidence, then i can research why this bias exists and decide to make changes, relevant to my research question.
+
+```{r}
+#Checking the possible imbalance in collision severity
+severity_tbl <- table(casualty_data_cleaner$collision_severity)
+View(severity_tbl)
+#Interesting! Far less slight severity casualties recorded
+#1: 668, 2: 11231, 3: 32414
+#Plotting to claim scope
+barplot(severity_tbl, main = "Recorded Collision Severity", xlab = "Collision severity", ylab = "Count", col = "#FFB0B5", border = "black")
+#Limitation 1 - Disproportionate recorded collision severities, this file better represents more serious casualties.
+```
+
+```{r}
+#Attempting to find the mean combined condition for each severity rating.
+library(dplyr)
+mean_cc_slight <- casualty_data_cleaner |> group_by(collision_severity) |> summarise(mean_cc_slight = mean(combined_conditions_numerical, na.rm = TRUE))
+```
+
+**Mean values of severities**
+
+- Slight (1) = 4.83
+- Severe (2) = 4.25
+- Fatal (3) = 4.11
+
+*It would be important to note that mean number of the slight casualties, happened with the conditions summing up to 4.3/18, which was the highest combined conditions value out of all severities. 
+
+
+## Creating new column for deeper analysis
+
+```{r}
+# derived variables or merges
+#Creating a column for binary high severity outcomes
+#high_severity = 1(fatal, severe)
+#high_severity = 0(slight)
+casualty_data_cleaner <- casualty_data_cleaner |> dplyr::mutate(high_severity = ifelse(collision_severity %in% c(1,2), 1, 0))
+#Viewing binary variable
+print(casualty_data_cleaner$high_severity)
+
+#Merging variables light_conditions, weather_conditions, and road_surface_conditions into sum variable combined_conditions.
+casualty_data_cleaner <- casualty_data_cleaner |> dplyr::mutate(combined_conditions = paste(light_conditions,
+weather_conditions,
+road_surface_conditions,
+sep = "_"
+))
+#Viewing combined_conditions.
+print(casualty_data_cleaner$combined_conditions)
+
+```
+
+```{r}
+#Creating combined conditions numerical
+casualty_data_cleaner <- casualty_data_cleaner |> dplyr::mutate(combined_conditions_numerical = light_conditions + weather_conditions + road_surface_conditions)
+```
+
+
+## Weekly Task - 5.2
+
+
+**Does my dataset give everyone equal visibility?**
+
+In the context of my Project where i am investigating Which combo of light, weather, and RS increase the likelihood of a severe casualty, outcome fairness is most relevant to my cause because since I'm interested in conditions creating severe casualties, the slight collisions representation doesn't really matter as much as the outcome fairness of the severities measured in my model does. 
+
+
+## Weekly Task - 5.3
+
+**How unequal proportions or outcomes for my chosen variable could create fairness issues later.**
+
+  - As explained above, while the unfairness in the sampling is obvious, the truest imbalance comes from the slight severity data since its recorded far less than the other groups. However, this doesn't affect fairness issues later since I'm mainly working with the higher severity data to target my research question, and while they are also disproportionate to each other the difference isn't as large with the sample estimates being relatively closer to each other.
+
+**Describe how you might detect or document this imbalance**
+
+  - I can detect and document this imbalance with the statistical proportion test displayed below. If the p-value of the groups is lower than 0.05 then there is significance in the in-balance of the groups of this variable.
+
+**The function set.seed() allows auditors to consistently replicate sampling and model training, and this reproducibility ensures that detected biases are constant throughout and not artifacts of random fluctuations.**
+
+
+**Testing balance statistically**
+```{r}
+#converting column to numerical
+casualty_data_cleaner$collision_severity <- as.numeric(casualty_data_cleaner$collision_severity)
+
+str(casualty_data_cleaner)
+#It is now a numerical column
+
+total_severity <- sum(casualty_data_cleaner$collision_severity)
+```
+
+
+```{r}
+#proportion test for slight severity 
+prop.test(x = 668, n = total_severity)
+#Slight severity p-value < 2.2e-16, significantly imbalanced
+#proportion test for severe collisions
+prop.test(x = 11231, n = total_severity)
+#Same p-value as slight severity, significantly imbalanced.
+#proportion test for fatal collisions
+prop.test(x = 32414, n = total_severity)
+#All groups have a p-value of <2.2e-16, this is a statistically imbalanced variable.
+```
+
+All groups have a p-value of <2.2e-16 meaning they're statistically imbalanced within the variable.
+
+## Weekly Task - 5.4
+
+**Hypothesis:** The combination of higher light conditions, higher weather conditions, and higher road surface conditions will increase the likelihood of a severe casualty.
+
+
+## Weekly Task - 5.5
+
+In accordance to my dataset and problem context these predictions can be biased simple because of the was these casualties are reported. The only instances recorded were the ones which were reported, leaving unreported data missing. Additionally, due to this being a self reported dataset, all of the environmental conditions were subjective which could lead to unreliable findings. A gloomy day to some might be a sunny day to others.
+
+
+## Weekly Task - 5.6
+
+I feel less inclined to share my linear regression and regression plots until I discover a new way to test the trends concerning variables like environmental conditions. This is because the categorical nature of these variables doesn't translate well in lm based forecasting. 
+
+
+Briefly calling attention to them in my report will increase trust in my conclusions because it shows that rather than going the standard route for analysis, i researched deeper for the most applicable/reliable analytic test for this specific question. This shows i have taken keen interest into the the details of this research question and dataset.
+
+
+## Weekly Task - 5.7
+
+In our project, we have demonstrated Accountability, and Transparency by recording the invalid values, coding errors, and changes during data cleaning in various sections, with detailed comments on our process.
+
+
+## Weekly Task - 5.8
+
+**Domain that directly connects to our project**
+
+Privacy. This is because within this dataset they are references to most collisions resulting in fatal casualties. Death is a highly sensitive topic to discuss or analyize in the context of data science or statistics. Dwindling somebodies death to a statistic, though life saving, is sensitive. Anonymisation is important to conceal the identity of those tragically lost.
+
+
+## Weekly Task - 5.9
+
+**Implementation:**Reproducibility steps I have completed are fixing the seed (see chapter 5.2), saving all information in this script, and documented all packages used.
+
+
+**Next Step:**To strengthen reproducibility I elaborated further in my answers to Bias/Fairness questions in this document. Additionally, my comments in the code chunks are just as heavily detailed as they've always been. 
+
+
+**Audit Connection:**I would point out my detailed comments and reflection form that proves my authentic analysis is reproducable.
+
+
+**Long-Term Habit:**In the workplace I will make sure to always comment on every piece of my work for a guided reference, as well as set.seed() to a specific number whenever a test of randomization needs to take place.
